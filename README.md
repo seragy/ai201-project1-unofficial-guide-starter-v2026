@@ -27,6 +27,8 @@
 
      Milestone 5. -->
 
+The Unofficial Guide is a RAG system built over the campus_life corpus — 88 short, informal posts covering the kind of practical information students share with each other but rarely find in official university documentation...
+
 ## Chunking Strategy
 
 **Chunk size:**

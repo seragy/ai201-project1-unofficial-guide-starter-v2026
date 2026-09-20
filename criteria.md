@@ -26,6 +26,9 @@ contains the answer.
 <!-- e.g. "One of my questions is about a topic only two documents mention, so
      I expect that one to be hard." -->
 
+I expect the "credit hours" question to be harder than the others, since the
+answer sits mid-paragraph in the housing lottery post rather than in its own
+short, direct sentence like my dining hours question.
 ---
 
 ## 2. Every answer names a source
@@ -35,6 +38,12 @@ Every answer the system produces names at least one source document.
 **Why this target:**
 <!-- Why all five and not four? What about your setup makes that achievable —
      or what would have to go wrong for it not to be? -->
+
+ **Why this target:**
+Naming a source only depends on my prompt instructing the model to cite
+whatever chunk it retrieved — it doesn't depend on retrieval finding the
+*right* chunk, just *a* chunk. That's a simpler bar to hit every time, so I
+expect 5 of 5 rather than 4 of 5.
 
 ---
 
@@ -69,9 +78,12 @@ in at least 4 of 5 tries.
        - "No chunk is shorter than 200 characters, since anything below that
           in my corpus turned out to be a heading with no content under it." -->
 
+No chunk exceeds 750 characters.
 
 
 **Why this target:**
+
+I picked 750 instead of my configured CHUNK_SIZE of 800 to leave a buffer, so I catch a chunk approaching the limit before it risks overflowing the actual ceiling.
 
 
 
@@ -88,9 +100,16 @@ in at least 4 of 5 tries.
      outcome. -->
 
 
+For all 5 of my test questions, an answer (or a refusal) is returned in
+under 1 minute.
+
 
 **Why this target:**
 
+A minute is my ceiling for what still feels like a responsive tool rather
+than a stuck or broken one. I don't have a measured baseline yet, so I'm
+setting this as a sanity check I can verify once I actually run my
+questions in Milestone 4.
 
 
 ---

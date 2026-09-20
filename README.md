@@ -41,6 +41,12 @@ split_documents now explicitly calls fallback_split with my chosen config
 values, rather than silently using the untouched default — this was a
 deliberate decision, not an oversight.
 
+I also checked generate.py and confirmed the starter already implements a
+grounding instruction (GROUNDING_INSTRUCTION) as a second layer on top of the
+relevance gate — it tells the model to answer only from the provided
+documents, refuse rather than guess, and name its source file. I verified
+this against my own test runs rather than assuming it worked.
+
 ## Sample Chunks
 
 **Chunk 1** — source: `admin_add_drop_deadline.txt#0` — produced by: `chunker.py::fallback_split`
@@ -136,18 +142,9 @@ showed it was already well-placed, not because I didn't check.
 
 ## How I Used AI
 
-<!-- Two specific moments. For each: what you asked for, what came back, and
-     what you changed about it.
+**1.** I drafted my Criterion 5 target (answers return in under 1 minute) and wrote "I picked 1 minute to keep a track of a fixed wait time" as my reasoning. Claude pointed out this was circular — it explained what the number was, not why that number specifically. I tried two more times, and Claude kept rejecting each one until I landed on something honest: 1 minute is my subjective ceiling for what still feels like a responsive tool, and I don't have a measured baseline yet, so it's a sanity check rather than a data-backed number. I wrote the final version myself once I understood what was actually missing.
 
-     "I asked Claude to write the chunking function from my notes. It ignored
-     the overlap, so I added that myself" is the level of detail we're after.
-     "I used AI to help me code" is not.
-
-     Milestone 5. -->
-
-**1.**
-
-**2.**
+**2.** For Milestone 3, Claude initially suggested I write a custom paragraph-splitting chunker to handle posts that mix two topics (like the housing lottery post). I asked if I could just keep the chunk size at 800 instead. Claude checked that against my actual data — my longest post is 549 characters, well under 800 — and agreed that a fixed-size window and paragraph splitting would produce identical results for my corpus, so keeping the simpler starter logic was a legitimate, evidence-based choice rather than a shortcut. I ended up documenting *why* I kept it instead of writing new splitting code.
 
 <!-- ── Stretch features ─────────────────────────────────────────────────────
      Doing one? Say so here BEFORE you start. A feature this README never

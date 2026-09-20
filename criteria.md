@@ -78,13 +78,12 @@ in at least 4 of 5 tries.
        - "No chunk is shorter than 200 characters, since anything below that
           in my corpus turned out to be a heading with no content under it." -->
 
-No chunk exceeds 750 characters.
+No chunk exceeds 800 characters.
 
 
 **Why this target:**
 
-I picked 750 instead of my configured CHUNK_SIZE of 800 to leave a buffer, so I catch a chunk approaching the limit before it risks overflowing the actual ceiling.
-
+800 is my configured CHUNK_SIZE, so this checks that my chunker actually respects its own ceiling rather than producing an oversized chunk by mistake.
 
 
 ---

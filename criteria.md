@@ -62,6 +62,13 @@ in at least 4 of 5 tries.
 <!-- What did your distances look like when you set the cutoff in Milestone 4?
      Was there a clean gap, or did the two groups overlap? -->
 
+When I ran my 5 in-corpus questions and 5 OUT_OF_SCOPE questions in Milestone 4,
+I found a clean, wide gap: in-corpus distances topped out at 0.433, while
+out-of-scope distances bottomed out at 0.825, with no overlap. Since the gap is
+this clean, I'd expect the gate to succeed close to 5 of 5, but I set the
+target at 4 of 5 to leave room for one edge case rather than requiring
+perfection on a system I hadn't tested yet when I wrote this.
+
 ---
 
 ## 4. Something about your chunks

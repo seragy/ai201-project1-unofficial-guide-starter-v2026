@@ -99,30 +99,40 @@ Laundry costs $1.75 wash, $1.75 dry, app-based. On noise: moderate; the building
 
 ## Sample Answer
 
-<!-- One complete question and answer, pasted as text, with the source line
-     visible. Milestone 4. -->
-
-**Question:**
+**Question:** Do students get chosen randomly for housing?
 
 **Answer:**
 
 ```
+No, the housing lottery is not entirely random; rising sophomores get a
+number drawn at random, but juniors and seniors are ordered by accumulated
+credit hours first, with random tie-breaks.
+
+Source: admin_housing_lottery.txt
 ```
 
-**My relevance cutoff:**
+**My relevance cutoff:** 0.6 (kept the starter's default)
 
-<!-- The number you set in config.py, and how you got there.
-
-     You ran five questions your corpus covers and the five in OUT_OF_SCOPE
-     that it clearly doesn't, and wrote down the best distance for each. What
-     did those two groups look like? Where was the gap? Put the actual numbers
-     here — the table below wants all ten rows.
-
-     Milestone 4. -->
+I ran all 5 in-corpus test questions and all 5 OUT_OF_SCOPE questions and found
+a wide, clean gap: my in-corpus questions topped out at 0.433, while my
+out-of-scope questions bottomed out at 0.825 — no overlap between the two
+groups. 0.6 sits comfortably in that gap, and at this cutoff all 5 in-corpus
+questions were answered correctly with sources, and all 5 out-of-scope
+questions were correctly refused. I kept the default because the evidence
+showed it was already well-placed, not because I didn't check.
 
 | Question | In corpus? | Best distance |
 |---|---|---|
-|  |  |  |
+| Which on-campus dorms offer private rooms or restrooms? | Yes | 0.404 |
+| Do students get chosen randomly for housing? | Yes | 0.305 |
+| What's the deadline for starting a grade appeal? | Yes | 0.218 |
+| Do dining halls have different hours on weekends? | Yes | 0.433 |
+| Can I add a course after week 1? | Yes | 0.401 |
+| What is the capital of Mongolia? | No | 0.825 |
+| How do I change the oil in a diesel engine? | No | 0.934 |
+| Who won the 1994 World Cup? | No | 0.886 |
+| What is the recommended dosage of ibuprofen for a headache? | No | 0.844 |
+| How do I write a for loop in Rust? | No | 0.896 |
 
 ## How I Used AI
 

@@ -45,6 +45,7 @@ TOP_K = 5               # how many chunks to pull back per question
 # Most corpora land somewhere between 0.45 and 0.75.
 THRESHOLD = 0.6
 
+HYBRID_SEARCH = True   # Milestone 4: set True to enable BM25 + semantic reranking
 
 # ─── Models ──────────────────────────────────────────────────────────────────
 # Embeddings run on your own machine and cost no API quota.

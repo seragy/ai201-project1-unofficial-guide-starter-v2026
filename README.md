@@ -146,6 +146,8 @@ showed it was already well-placed, not because I didn't check.
 
 **2.** For Milestone 3, Claude initially suggested I write a custom paragraph-splitting chunker to handle posts that mix two topics (like the housing lottery post). I asked if I could just keep the chunk size at 800 instead. Claude checked that against my actual data — my longest post is 549 characters, well under 800 — and agreed that a fixed-size window and paragraph splitting would produce identical results for my corpus, so keeping the simpler starter logic was a legitimate, evidence-based choice rather than a shortcut. I ended up documenting *why* I kept it instead of writing new splitting code.
 
+**3.** After hybrid search came back with byte-for-byte identical results to the "before" run, I asked Claude why it might have had zero effect rather than assuming it was broken. Claude walked through the actual BM25 math with me: hybrid reranking can only help when the *question itself* contains a term that discriminates between candidates, and my question never mentioned the specific fact I was testing for ("9:00am") — it just said "hours" and "weekends," which every wrongly-retrieved document also contained. That reasoning changed my diagnosis from "semantic search misses exact terms" to the real mechanism: two dining halls each having a main post plus a followup structurally crowd out a single-post dining hall regardless of ranking method. I wrote the corrected diagnosis myself once I understood the actual mechanism.
+
 <!-- ── Stretch features ─────────────────────────────────────────────────────
      Doing one? Say so here BEFORE you start. A feature this README never
      claims earns nothing.
@@ -240,88 +242,145 @@ Refused 5 of 5, cutoff 0.6:
 
 ## Verdicts
 
-<!-- MET or MISSED for each of the five, against the target you wrote last
-     unit — not a new one. Plus a sentence on how you decided. That sentence
-     matters most where it was close.
-
-     If your target said 4 of 5 and your runs came out 4, 3, 4, that's a MISS.
-     The target has to hold, not show up occasionally.
-
-     Milestone 2. -->
-
 | # | Criterion | Verdict | How I decided |
 |---|---|---|---|
-| 1 |  |  |  |
-| 2 |  |  |  |
-| 3 |  |  |  |
-| 4 |  |  |  |
-| 5 |  |  |  |
+| 1 | Retrieved chunk contains the answer | MET | My scorer's raw pass/fail (fail, pass, fail on the dorms question) was actually catching Gemini's wording changing between "kitchen and bathroom" and "kitchens and bathrooms," not a retrieval problem — so I checked the retrieved chunk text directly for all 5 questions instead of trusting judge()'s output. 4 of 5 questions had the answer literally present in a retrieved chunk, identically across all 3 runs since retrieval is deterministic, meeting my 4-of-5 target. |
+| 2 | Every answer names a source | MET | All 15 answers across the 3 runs (5 questions × 3 runs) named at least one source file, with zero exceptions — this held even on the question that failed Criterion 1, since the system still cited real (if not fully sufficient) sources. |
+| 3 | Gate stops out-of-corpus questions | MET | All 5 out-of-scope questions were refused in every run, exceeding my 4-of-5 target. Since retrieval is deterministic and the gate is a fixed comparison, this is a single measurement rather than something that could vary across 3 runs. |
+| 4 | No chunk exceeds 800 characters | MET | Confirmed directly from the index summary at indexing time: 88 chunks, longest 549 characters, well under the 800-character ceiling. This is a structural property of the chunker, not something that varies per question, so a single check across the whole corpus is sufficient evidence. |
+| 5 | Answer returned in under 1 minute | MET | My first timing pass showed 0 model calls (cached results), which isn't a real latency measurement. After clearing `.cache` and re-running all 5 questions with real model calls, times ranged from 3.22s to 5.14s — comfortably under the 1-minute target, 5 of 5. |
 
 ## Diagnoses
 
-<!-- For each miss: which stage caused it, and how. The stage alone isn't
-     enough — you need the mechanism.
+All 5 criteria came out MET at the target level, so nothing here required
+loosening a target to pass. But diagnosing at the individual-question level
+inside Criterion 1 surfaced one real, reproducible failure worth tracing
+properly, since the aggregate 4-of-5 target was loose enough to absorb it
+without registering as a miss.
 
-     Not a diagnosis: "Question 3 didn't work."
-     A diagnosis:     "Question 3 asks about laundry costs. The answer is in
-                       one sentence that got split across two chunks, so
-                       neither chunk on its own contains it."
+**Question 4 ("Do dining halls have different hours on weekends?") — Retrieval failure.**
 
-     The five stages: loading → chunking → embedding → retrieval → generation.
+The correct source, `dining_kestrel_commons.txt`, is never retrieved across
+all 3 runs — the same 5 sources come back every time: `dining_halden_hall.txt`,
+`dining_halden_hall_followup.txt`, `dining_pellew_dining_hall.txt`,
+`dining_pellew_dining_hall_followup.txt`, `money_jobs.txt`. Since retrieval
+is deterministic, this isn't noise — it's a structural miss.
 
-     Look for a pattern. If three misses all ask about numbers, that's one
-     problem, not three.
+The mechanism: my corpus has two documents each for Halden Hall and Pellew
+Dining Hall (a main post plus a "followup" reply), so those two dining halls
+occupy 4 of the 5 retrieval slots for any generic "dining hall hours"
+question, crowding out other dining halls that only have a single document —
+like Kestrel Commons — even when that single document is the one that
+actually answers the question. On top of that, the Kestrel Commons chunk
+itself mixes two topics (wait-time/food tips, and separately, hours/cost),
+the exact "one chunk, two ideas" pattern I flagged as a risk in Unit 1's
+Chunking Strategy section but chose not to split at the time. A chunk
+covering two topics likely produces a more diluted embedding — less
+precisely matched to an hours-specific query than a chunk about hours alone
+would be — which may be compounding the crowding effect from the duplicate
+Halden/Pellew documents.
 
-     Missed nothing? Say so, then say honestly whether your targets were set
-     low, and which one you'd tighten and to what.
+**Pattern check:** this is currently my only real miss, so there's no
+cross-question pattern to report yet — but the mechanism (a mixed-topic
+chunk, plus asymmetric document duplication across dining halls) is worth
+watching for on other questions if I ran a wider test set.
 
-     Milestone 3. -->
+**Honest note on target-setting:** because my Criterion 1 target was "at
+least 4 of 5," this exact known failure sits inside the passing margin
+without ever registering as a MISS. A tighter target (5 of 5) would have
+caught it. I'm not revising the target after the fact — the current target
+stands, and this is exactly the kind of target-safety observation the
+assignment asks me to be honest about rather than pretend didn't happen.
 
 ## The Improvement
 
-**What I changed:**
+**What I changed:** Added hybrid search — BM25 keyword scoring blended with
+existing semantic distance (60% semantic, 40% keyword) — to `store.py`'s
+`search()` function, toggled via `config.HYBRID_SEARCH`.
 
-**Why I picked it:**
-
-<!-- Connect it to a specific diagnosis above in one sentence. If you can't,
-     you picked a fix because it sounded impressive. -->
+**Why I picked it:** My Milestone 3 diagnosis showed Question 4 ("Do dining
+halls have different hours on weekends?") never retrieves its correct
+source, `dining_kestrel_commons.txt`, across any of 3 runs. This looked like
+a textbook case for hybrid search, per the slides: "names, numbers, or exact
+terms that semantic search glides past."
 
 ### Run Log — After
 
-<!-- Same format, same five criteria, three runs each.
-     `python run_eval.py --label after` -->
-
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
-| 1. Retrieved chunk contains the answer | 4 of 5 |  |  |  |  |
-| 2. Every answer names a source | 5 of 5 |  |  |  |  |
-| 3. Gate stops out-of-corpus questions | 4 of 5 |  |  |  |  |
-| 4. | | | | | |
-| 5. | | | | | |
+| 1. Retrieved chunk contains the answer | 4 of 5 | 4/5 | 4/5 | 4/5 | MET |
+| 2. Every answer names a source | 5 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| 3. Gate stops out-of-corpus questions | 4 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| 4. No chunk exceeds 800 characters | true | true | true | true | MET |
+| 5. Answer returned in under 1 minute | 5 of 5 | — | — | — | MET (not re-timed; hybrid reranking is local Python with no extra model calls, so latency is unaffected — confirmed by the identical 15 model calls in this session vs. the before run) |
 
-**Did it help?**
+### Real output — Question 4 after hybrid search (all 3 runs)
 
-<!-- Say plainly whether it did, and how you know. If it made things worse,
-     say that — a change that backfired, honestly reported, earns full credit
-     and is more interesting than one that worked. What matters is that you can
-     tell.
+```
+### Do dining halls have different hours on weekends? — run 1
+Best distance: 0.4325 (passed the gate)
+Sources retrieved: dining_halden_hall.txt, dining_halden_hall_followup.txt, dining_pellew_dining_hall.txt, dining_pellew_dining_hall_followup.txt, money_jobs.txt
 
-     Milestone 4. -->
+### Do dining halls have different hours on weekends? — run 2
+Best distance: 0.4325 (passed the gate)
+Sources retrieved: dining_halden_hall.txt, dining_halden_hall_followup.txt, dining_pellew_dining_hall.txt, dining_pellew_dining_hall_followup.txt, money_jobs.txt
+
+### Do dining halls have different hours on weekends? — run 3
+Best distance: 0.4325 (passed the gate)
+Sources retrieved: dining_halden_hall.txt, dining_halden_hall_followup.txt, dining_pellew_dining_hall.txt, dining_pellew_dining_hall_followup.txt, money_jobs.txt
+```
+
+**Did it help? No — and figuring out why changed my diagnosis.**
+
+The retrieved sources for Question 4 are byte-for-byte identical before and
+after: `dining_halden_hall.txt`, `dining_halden_hall_followup.txt`,
+`dining_pellew_dining_hall.txt`, `dining_pellew_dining_hall_followup.txt`,
+`money_jobs.txt` — same distances too (0.4325 both times). Hybrid search only
+helps when the *question* contains an exact term that discriminates between
+candidates. My question never mentions "9:00am" — it just says "hours" and
+"weekends," and every wrongly-retrieved dining hall document *also* says
+"hours" and "weekends," since they're all posts about dining hall hours.
+BM25 had nothing to discriminate on, so the semantic ranking (which was
+already the problem) won every tie.
+
+This means my original diagnosis was half right and half wrong: the
+retrieval failure is real, but the mechanism isn't "semantic search glides
+past an exact term" — it's that Halden Hall and Pellew Dining Hall each have
+2 documents in my corpus (a main post plus a "followup" reply), so they
+structurally occupy 4 of 5 retrieval slots for any generic dining-hours
+question, regardless of ranking method. Hybrid search targeted the wrong
+layer of the problem.
 
 ## What's Still Broken
 
-<!-- For each criterion still missed after your fix: what you'd do about it,
-     and why you stopped where you did.
-
-     "I ran out of time" is fine if it's true. Pretending nothing is left is
-     not.
-
-     Milestone 5. -->
+**Question 4 (dining hours) retrieval failure — still unresolved.** My one
+allowed improvement (hybrid search) didn't fix it, and the assignment's rule
+is one change per unit, so I'm not attempting a second fix now. What I'd try
+next, based on the corrected diagnosis: either (1) increase `top_k` from 5 to
+7-8 so Kestrel Commons has room to surface even with Halden and Pellew each
+occupying 2 slots, tested carefully against the "Lost in the Middle" risk
+from lecture — more chunks isn't automatically better; or (2) deduplicate
+near-identical "followup" documents at index time, so a single dining hall
+doesn't structurally crowd out others just by having more posts written
+about it. I stopped here because the unit's own rule is one measured change,
+not four — this is the next thing to try, not something I ran out of time
+on.
 
 ## What I'd Do Differently
 
-<!-- Knowing what you know now — which of your five criteria would you write
-     differently, and why?
+I'd rewrite Criterion 1's target. "At least 4 of 5" was loose enough that a
+real, reproducible retrieval failure (Question 4) sat inside the passing
+margin the entire time — I only found it by manually checking chunk text
+against `expects`, not from the verdict itself. A tighter target, or a
+sixth criterion specifically about retrieval diversity (e.g. "no single
+source document occupies more than 2 of the top-5 slots for any question"),
+would have surfaced this exact problem directly from the run log instead of
+requiring a separate manual check.
 
-     Milestone 5. -->
-     
+I'd also build `judge()` differently from the start: it currently checks
+the *generated answer* text against `expects`, but Criterion 1 is actually
+about the *retrieved chunk* — a different layer entirely. Writing a second
+scorer function that checks `results` directly (which `judge()` already
+receives but doesn't use) would have caught the Question 4 failure
+automatically in Milestone 1, rather than needing me to notice the
+scorer/criterion mismatch by hand afterward.

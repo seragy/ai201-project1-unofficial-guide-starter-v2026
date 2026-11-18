@@ -427,3 +427,270 @@ Out of scope, decided before building:
 
 Size check: one file changed (`serve.py`), one new tool, one RUNNING.md
 section. That's under the ~90-minute build budget.
+
+**Running It**
+
+Path B, local with logs. Hosting is out of scope (see The Shape). The single
+start command is `./run.sh`, and [RUNNING.md](RUNNING.md) ("Capstone (unit 9)")
+has the environment, the clean-checkout steps and the measuring command.
+
+I tested those instructions on myself: a fresh `git clone` of this repo into
+an empty folder, a new venv, `pip install -r requirements.txt`, `cp .env.example
+.env` plus a key, then `./run.sh`. The run built the index (`stored 88 chunks in
+44.6s`), gunicorn came up, `/health` returned `"index_ready": true`, the
+housing-lottery question was answered in 7.4 s cold, and the record landed in
+that clone's own `logs/requests.jsonl`. What a fresh clone would otherwise have
+hit: `chroma_db/` is gitignored, so there's no index, which is why `run.sh`
+builds one when it's missing instead of serving a service that refuses
+everything.
+
+**Instrumentation**
+
+Every `POST /ask` writes one JSON line to `logs/requests.jsonl`
+(`serve.py::_log_request`). That includes requests the route rejects and
+requests that crash: an `@app.errorhandler(Exception)` logs those and returns
+JSON instead of Flask's HTML error page.
+
+| field | on | what it is |
+|---|---|---|
+| `timestamp` | all | UTC, milliseconds |
+| `request_id` | all | 12 hex chars, also returned in the response, so a user's complaint can be matched to its line |
+| `route`, `status` | all | path and HTTP status sent back |
+| `outcome` | all | `answered` · `refused` (gate) · `rejected` (bad input, 4xx) · `error` (crash, 5xx) |
+| `question`, `question_chars` | all | what came in (first 500 chars) and its real length |
+| `duration_ms` | all | server time for the whole request |
+| `corpus`, `model` | all | which index and which model answered |
+| `answer`, `answer_chars`, `refused`, `sources` | 200s | what went out |
+| `best_distance`, `threshold` | 200s | why the gate decided what it did |
+| `retrieval_ms`, `generation_ms` | 200s | where the time went: search + gate, then the model call (0 when refused) |
+| `model_calls`, `prompt_tokens`, `output_tokens`, `total_tokens`, `cache_hit` | 200s | what it cost, as reported by the model on the response itself |
+| `error_type`, `error` | 4xx / 5xx | which check rejected it, or the exception |
+
+Ten entries from the after run (trial 1; long answers cut at 160 characters
+here, in full in the file). The first is the warm-up: a cold start, where
+retrieval is 1.7 s because the embedder is loading.
+
+```json
+{"timestamp": "2026-11-18T19:47:26.837+00:00", "request_id": "2546474d4882", "route": "/ask", "status": 200, "outcome": "answered", "question": "Where can I print on campus?", "question_chars": 28, "duration_ms": 3831.7, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "answer": "Based on the provided documents, printing is mentioned in relation to a student printing quota and student accounts, but the documents do not state specific loc…", "answer_chars": 322, "refused": false, "best_distance": 0.4991, "threshold": 0.6, "sources": ["admin_printing_quota.txt", "admin_wifi_and_accounts.txt", "dining_verrill_street_grill.txt", "money_jobs.txt", "money_textbooks.txt"], "retrieval_ms": 1717.9, "generation_ms": 2113.7, "model_calls": 1, "cache_hit": false, "prompt_tokens": 568, "output_tokens": 70, "total_tokens": 638}
+{"timestamp": "2026-11-18T19:47:28.096+00:00", "request_id": "f390366debbd", "route": "/ask", "status": 200, "outcome": "answered", "question": "Which on-campus dorms offer private rooms or restrooms?", "question_chars": 55, "duration_ms": 1255.7, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "answer": "Based on the provided documents:\n- **Tamsin Court** offers rooms that are studio apartments with private kitchens and bathrooms (housing_tamsin_court.txt).\n- **…", "answer_chars": 241, "refused": false, "best_distance": 0.4038, "threshold": 0.6, "sources": ["housing_aldridge_hall.txt", "housing_fenwick_court.txt", "housing_innisfree_hall.txt", "housing_old_brewhouse.txt", "housing_tamsin_court.txt"], "retrieval_ms": 107.0, "generation_ms": 1148.6, "model_calls": 1, "cache_hit": false, "prompt_tokens": 791, "output_tokens": 60, "total_tokens": 851}
+{"timestamp": "2026-11-18T19:47:31.172+00:00", "request_id": "12f4c7dfcc43", "route": "/ask", "status": 200, "outcome": "answered", "question": "Do students get chosen randomly for housing?", "question_chars": 44, "duration_ms": 3069.5, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "answer": "Rising sophomores get a number drawn at random in the housing lottery, but juniors and seniors are ordered by accumulated credit hours first, with random tie-br…", "answer_chars": 203, "refused": false, "best_distance": 0.3053, "threshold": 0.6, "sources": ["admin_housing_lottery.txt", "advising_registration.txt", "housing_aldridge_hall.txt", "housing_aldridge_hall_noise.txt", "housing_tamsin_court.txt"], "retrieval_ms": 86.5, "generation_ms": 2983.0, "model_calls": 1, "cache_hit": false, "prompt_tokens": 598, "output_tokens": 46, "total_tokens": 644}
+{"timestamp": "2026-11-18T19:47:32.118+00:00", "request_id": "536cf4cdd8a9", "route": "/ask", "status": 200, "outcome": "answered", "question": "What's the deadline for starting a grade appeal?", "question_chars": 48, "duration_ms": 943.5, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "answer": "A grade appeal has to be raised within fifteen days of the grade posting. \n\nSource: admin_grade_appeals.txt", "answer_chars": 107, "refused": false, "best_distance": 0.2177, "threshold": 0.6, "sources": ["admin_add_drop_deadline.txt", "admin_grade_appeals.txt", "admin_pass_fail_option.txt", "admin_withdrawal_deadline.txt", "course_stat_150.txt"], "retrieval_ms": 138.9, "generation_ms": 804.6, "model_calls": 1, "cache_hit": false, "prompt_tokens": 542, "output_tokens": 27, "total_tokens": 569}
+{"timestamp": "2026-11-18T19:47:34.010+00:00", "request_id": "c1d00e008eaa", "route": "/ask", "status": 200, "outcome": "answered", "question": "Do dining halls have different hours on weekends?", "question_chars": 49, "duration_ms": 1887.6, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "answer": "Yes. Halden Hall is closed on Sundays (dining_halden_hall.txt), while Pellew Dining Hall is open daily (dining_pellew_dining_hall.txt).", "answer_chars": 135, "refused": false, "best_distance": 0.4325, "threshold": 0.6, "sources": ["dining_halden_hall.txt", "dining_halden_hall_followup.txt", "dining_pellew_dining_hall.txt", "dining_pellew_dining_hall_followup.txt", "money_jobs.txt"], "retrieval_ms": 111.9, "generation_ms": 1775.7, "model_calls": 1, "cache_hit": false, "prompt_tokens": 667, "output_tokens": 40, "total_tokens": 707}
+{"timestamp": "2026-11-18T19:47:53.205+00:00", "request_id": "8bc589ac1f6a", "route": "/ask", "status": 200, "outcome": "answered", "question": "Can I add a course after week 1?", "question_chars": 32, "duration_ms": 976.5, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "answer": "Yes, you can add a course through the end of the second week. \n\nSource: `admin_add_drop_deadline.txt`", "answer_chars": 101, "refused": false, "best_distance": 0.4012, "threshold": 0.6, "sources": ["admin_add_drop_deadline.txt", "admin_pass_fail_option.txt", "advising_registration.txt", "course_biol_160_workload.txt", "course_cs_340.txt"], "retrieval_ms": 103.5, "generation_ms": 872.9, "model_calls": 1, "cache_hit": false, "prompt_tokens": 560, "output_tokens": 30, "total_tokens": 590}
+{"timestamp": "2026-11-18T19:47:41.943+00:00", "request_id": "fba9d56b4033", "route": "/ask", "status": 200, "outcome": "refused", "question": "What is the capital of Mongolia?", "question_chars": 32, "duration_ms": 100.3, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "answer": "I don't have enough information about that.", "answer_chars": 43, "refused": true, "best_distance": 0.8246, "threshold": 0.6, "sources": [], "retrieval_ms": 100.3, "generation_ms": 0.0, "model_calls": 0, "cache_hit": false, "prompt_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+{"timestamp": "2026-11-18T19:47:42.037+00:00", "request_id": "550b48095907", "route": "/ask", "status": 200, "outcome": "refused", "question": "How do I change the oil in a diesel engine?", "question_chars": 43, "duration_ms": 91.9, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "answer": "I don't have enough information about that.", "answer_chars": 43, "refused": true, "best_distance": 0.934, "threshold": 0.6, "sources": [], "retrieval_ms": 91.9, "generation_ms": 0.0, "model_calls": 0, "cache_hit": false, "prompt_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+{"timestamp": "2026-11-18T19:47:42.313+00:00", "request_id": "1fa711ba3455", "route": "/ask", "status": 400, "outcome": "rejected", "question": "", "question_chars": 0, "duration_ms": 0.1, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "error_type": "question_not_string", "error": "'question' must be a string"}
+{"timestamp": "2026-11-18T19:47:42.315+00:00", "request_id": "82534a7df505", "route": "/ask", "status": 400, "outcome": "rejected", "question": "", "question_chars": 0, "duration_ms": 0.1, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "error_type": "body_not_object", "error": "the request body must be a JSON object"}
+```
+
+Two failed runs from the before run: the crash path, logged rather than lost.
+These are the C2 misses.
+
+```json
+{"timestamp": "2026-11-18T19:45:12.226+00:00", "request_id": "ba840881e0a1", "route": "/ask", "status": 500, "outcome": "error", "question": null, "question_chars": null, "duration_ms": 0.1, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "error_type": "AttributeError", "error": "'int' object has no attribute 'strip'"}
+{"timestamp": "2026-11-18T19:45:12.229+00:00", "request_id": "668e9986ca4d", "route": "/ask", "status": 500, "outcome": "error", "question": null, "question_chars": null, "duration_ms": 0.1, "corpus": "campus_life", "model": "gemini-3.5-flash-lite", "error_type": "AttributeError", "error": "'list' object has no attribute 'get'"}
+```
+
+The whole log (126 records across the smoke test and six trials) is committed
+at `logs/requests.jsonl`.
+
+**What It Costs**
+
+Measured from `prompt_tokens` / `output_tokens` on the log records, which
+`generate.py::_record_tokens` reads off each response's `usage_metadata`. The
+counts are what the model reported, not what I estimated.
+
+- **The 10-run measurement** (after run, trial 1, the 10 in-scope questions):
+  mean **624.6 input + 42.6 output = 667.2 tokens** per answered question,
+  mean **1.50 s** server time.
+- **All 60 answered questions across six trials:** 624.6 input + 47.9 output =
+  672.5 tokens. Server time: mean 2.0 s, median 1.3 s, max 12.6 s. Retrieval is
+  ~0.1 s of that (median 103 ms warm); the rest is the model call.
+- **Refused questions:** 0 tokens and 0 model calls (30 of 30), ~0.18 s.
+  **Rejected requests:** 0 tokens, ~0.1 ms.
+
+In money, at Gemini 3.5 Flash-Lite's list price of $0.30 per 1M input and $2.50
+per 1M output tokens: 624.6 × 0.30/1M + 47.9 × 2.50/1M = $0.000187 + $0.000120
+= **$0.00031 per answered question**. My actual spend was **$0**, because the
+key is on the free tier. The price comes from pricing trackers that cite
+Google's page (e.g. pricepertoken.com, eesel.ai); I didn't open Google's page
+itself.
+
+**A hundred people a day:** say each asks 5 questions, all answered (an upper
+bound, since refusals cost nothing). That's 500 × $0.00031 = **$0.15 a day,
+about $4.60 a month**, and 500 × 2.0 s = 1,000 s of server time a day, about
+17 minutes for one worker. The money isn't the constraint. The 12.6 s tail is:
+one sync worker serves one request at a time, so a slow model call holds up
+everyone queued behind it.
+
+**Run Log and Verdicts**
+
+Before, three trials, each a fresh `gunicorn` start
+(`results/capstone_2026-11-18_1446_before.md`, produced by
+`tools/measure.py::main`, which scores everything from the log records):
+
+| Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
+|---|---|---|---|---|---|
+| C1. One complete record per request | 20 of 20 | 20/20 | 20/20 | 20/20 | MET |
+| C2. Malformed → 4xx JSON + rejected record | 5 of 5 | 3/5 | 3/5 | 3/5 | MISSED |
+| C3. Warm answered ≤ 3000 ms | ≥ 9 of 10 | 8/10 | 4/10 | 8/10 | MISSED |
+| C4. Tokens: mean ≤ 750, max ≤ 1000, refused = 0 | all three | 672 / 848 / 5 of 5 | 673 / 850 / 5 of 5 | 676 / 853 / 5 of 5 | MET |
+| C5. Answers unchanged (unit-1 questions) | ≥ 9 of 10 | 8/10 | 8/10 | 8/10 | MISSED |
+
+The trials differ (C3: 8, 4, 8) because the answers come from a hosted model
+called fresh each time with the cache off. Same code, different afternoon.
+
+Real output underneath each, from `logs/requests.jsonl` via
+`results/capstone_2026-11-18_1446_before.md`:
+
+- **C1, MET:** each trial wrote 21 records (20 + the warm-up), and every
+  request_id in a response matched exactly one record. Example matched pair:
+  trial 1's first question returned `"request_id": "04eae9e09c74"`, and the log
+  holds exactly one line for it:
+  `{"request_id": "04eae9e09c74", "status": 200, "outcome": "answered", "duration_ms": 2283.1, …}`.
+- **C2, MISSED:** `malformed: no body→400, empty question→400, whitespace
+  question→400, question is a number→500, body is a JSON list→500`, the same in
+  all three trials. The two 500 records are pasted under Instrumentation.
+- **C3, MISSED:** trial 2 in-scope `duration_ms`: `[3309.4, 1136.9, 2489.8,
+  3072.2, 12580.0, 3065.5, 3425.8, 914.3, 8130.1, 2076.1]`, with retrieval
+  `[97.8, 109.7, 115.9, 142.4, 617.1, 98.9, 92.3, 93.4, 95.9, 93.2]` and
+  generation `[3211.5, 1027.1, 2373.8, 2929.6, 11962.8, 2966.6, 3333.5, 820.9,
+  8034.2, 1982.8]`.
+- **C4, MET:** trial 1 per-question `total_tokens`: `848, 648, 569, 711, 588,
+  785, 705, 564, 597, 707`; every refused record has `"model_calls": 0,
+  "total_tokens": 0`.
+- **C5, MISSED:** `✗ Which on-campus dorms offer private room…, ✓ …housing,
+  ✓ …grade appeal, ✗ Do dining halls have different hours…, ✓ …add a course`,
+  plus 5 of 5 out-of-scope refused. The dorms answer was `"Tamsin Court offers
+  studio apartments with private kitchens and bathrooms
+  (housing_tamsin_court.txt)"`.
+
+**Diagnoses**
+
+- **C2, stage: the route's input handling (`serve.py::ask`). Mechanism:** it
+  assumed the body was a JSON object and the question a string.
+  `payload.get(...)` on a list, and `(42 or "").strip()` on an int, both raise
+  `AttributeError` before any check runs, so a caller's mistake became a 500.
+  The logging itself worked: both crashes left `outcome: "error"` records,
+  which is how I can name the exception. I saw the list case in my build smoke
+  test before writing the criteria, and left it unfixed so the fix would be
+  measured.
+- **C3, stage: generation, the hosted Gemini call. Mechanism:** the time
+  sits in the model's response time, not in my pipeline, and not in prompt size.
+  Across all 30 before-run questions, retrieval was 90 ms–1.0 s; every request
+  over 3 s had `generation_ms` over 2.9 s. The slow ones weren't the big ones:
+  the 12.6 s request had 585 tokens and the 853-token dorms question took 0.9 s in
+  trial 3. Trial 2 was slow across the board (4/10), the other two at 8/10, with
+  identical code. That's free-tier latency variance. My target assumed the
+  model's tail was rarer than 1 in 10, and on this afternoon it wasn't.
+- **C5, stage: my scoring rule, plus one real retrieval miss. Two mechanisms.**
+  (1) The dorms answer is correct, but the model writes "private kitchen**s**
+  and bathroom**s**" and my criterion's exact-substring rule wants "kitchen and
+  bathroom". Unit 2's README documented this exact wording flip, and in the
+  after run the model happened to use the singular once (trial 2: 9/10). The
+  system didn't regress; the scorer can't tell rewording from regression.
+  (2) The weekend-hours question misses "9:00am", which is the retrieval
+  failure unit 2 diagnosed and left out of scope. The target-setting mistake is
+  mine: I wrote "9 of 10 is no worse than before" from memory of unit 2's
+  verdicts. By this scorer, unit 2's own after-run already had the dorms
+  question failing all three times (`results/run_2026-09-27_1358_after.md`),
+  so the honest baseline was 8 of 10.
+
+**Pattern:** the three misses have three different stages: the route, the
+hosted model, and my scorer. Only one, C2, is code I own that was wrong. The
+instrumentation is what made each one nameable: the per-stage timings put C3 on
+the model, and the `error_type` records put C2 on the route.
+
+**The Improvement**
+
+**What I changed:** one thing. `serve.py::ask` now checks the request's shape
+before using it. A body that isn't a JSON object returns 400 `body_not_object`,
+and a `question` that isn't a string returns 400 `question_not_string`. Both
+are logged as `outcome: "rejected"`. Nothing in retrieval, the gate, the prompt
+or generation changed. Commit: "capstone improvement: validate request shape…".
+
+**Why:** the C2 diagnosis named this stage and this mechanism exactly, and it's
+the only miss caused by my code. C3's cause is upstream, and C5's is in the
+scorer.
+
+After, same three fresh-start trials (`results/capstone_2026-11-18_1448_after.md`):
+
+| Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
+|---|---|---|---|---|---|
+| C1. One complete record per request | 20 of 20 | 20/20 | 20/20 | 20/20 | MET |
+| C2. Malformed → 4xx JSON + rejected record | 5 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| C3. Warm answered ≤ 3000 ms | ≥ 9 of 10 | 9/10 | 10/10 | 9/10 | MET |
+| C4. Tokens: mean ≤ 750, max ≤ 1000, refused = 0 | all three | 667 / 851 / 5 of 5 | 676 / 859 / 5 of 5 | 671 / 848 / 5 of 5 | MET |
+| C5. Answers unchanged (unit-1 questions) | ≥ 9 of 10 | 8/10 | 9/10 | 8/10 | MISSED |
+
+Real C2 output after: `malformed: no body→400, empty question→400, whitespace
+question→400, question is a number→400, body is a JSON list→400`, in all three
+trials. The two rejected records are the last two of the ten under
+Instrumentation.
+
+**Did it help?** For C2, yes: 3/5 became 5/5 in every trial, with zero 500s
+left. **C3 also flipped to MET, and my change did not cause that.** Validation
+runs before retrieval and never touches the model call. The after run's model
+calls were simply faster: generation stayed under 3.8 s, against 12 s and 8 s
+spikes before. If I counted C3 as fixed I'd be crediting the change with
+Google's afternoon, so I'm calling C3 **MET by these runs, with no fix behind
+it**. Pooled over both runs it's 48 of 60 under 3 s (20 of 30 before, 28 of 30 after); a second slow afternoon
+would miss it again. C1 and C4 held, so the change cost nothing, and C5 didn't
+move, as expected.
+
+**What's Still Broken**
+
+- **C5 (missed both runs).** I'd fix the scorer before touching the system:
+  normalise singular and plural, or check the retrieved chunk text the way unit
+  2 ended up doing by hand. Then the weekend-hours retrieval failure would
+  be the only miss left, and I'd decide whether that one is worth a unit. I
+  stopped because changing the scorer and calling it a pass is close to moving
+  the goalposts, and that fix would have been a second change in a unit that
+  allows one.
+- **C3 (met this time, not fixed).** The tail is the hosted model. What would
+  actually help is a per-call timeout plus one retry on generation (the genai
+  client accepts an HTTP timeout), or streaming, so the first words arrive
+  under a second. I stopped because a retry doubles the tokens on exactly the
+  slow calls, which moves cost (C4) the wrong way, and I'd want a criterion
+  for that trade before making it.
+- **A target set too low:** C4. All six trials sat at 667–676 mean against a
+  750 ceiling, and refusals cost exactly zero. I'd tighten it to **mean ≤ 700
+  tokens and max ≤ 900**. That's still above what I measured, but close enough
+  that one extra chunk or a longer system prompt would show up as a miss.
+  C1 was also never in danger. 20/20 six times says the target was fine, but
+  the test never stressed it: no concurrency, no disk errors.
+
+**The one thing I'd do next:** add the generation timeout-and-retry *with* a
+criterion on its cost, e.g. "≥ 9 of 10 warm answers under 3 s, and mean
+tokens per answered question rises by no more than 10%". Latency is the one
+thing a real user of this service would notice, and the log now shows exactly
+which stage to aim at.
+
+**How I Used AI**
+
+**Moment 1: checking my criteria before any results existed.**
+- *What I asked:* the unit's self-check prompt, run against my committed C1–C5:
+  "how exactly would you test it using only the sentence itself, would two
+  people score it the same way, and what would have to happen for it to fail?
+  Don't rewrite them."
+- *What came back:* real ambiguities. Was `duration_ms` the whole request or
+  one stage? Did the warm-up count toward C1's 20 (it would make 21 lines)?
+  What would C4 average over if an in-scope question got refused? Was C5's
+  "contains" case-sensitive, and did ".txt" have to be in the answer text or
+  just the `sources` field?
+- *What I changed:* I added a "How each is scored" block under the criteria,
+  pinning each of those down without changing any target, and committed it
+  *before* the first test run. That order is in the history (`d7562d2`
+  before `c2c14b0`).
+
+**Moment 2: diagnosing C3, and not taking credit for it.**
+- *What I asked:* for the slow requests to be explained from the log, with
+  retrieval and generation time and token counts side by side.
+- *What came back:* every slow request was slow in `generation_ms`, retrieval
+  stayed near 0.1 s, and size didn't predict it (585 tokens took 12.6 s). Then,
+  after the fix, the first draft of the results said the improvement had
+  helped C2 *and* C3.
+- *What I changed:* I cut that claim. The validation fix runs before the model
+  call, so it can't have sped generation up. The write-up now says C3 was met
+  by a faster API afternoon, with no fix behind it, and keeps the timeout idea
+  in What's Still Broken.

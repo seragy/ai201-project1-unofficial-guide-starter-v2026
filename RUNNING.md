@@ -255,3 +255,65 @@ units.
 
 `results/` is deliberately **not** in `.gitignore`. Your run logs are evidence
 that the test actually happened, and they're part of what gets graded.
+
+---
+
+## Capstone (unit 9): running it as a service, with logs. Path B
+
+This is the run path the capstone is graded on. One command starts the service
+the way a host would (gunicorn, not Flask's dev server), and every request
+leaves a structured record in `logs/requests.jsonl`.
+
+### What the environment needs
+
+| | |
+|---|---|
+| Python | 3.11–3.13 (tested on **3.13.9**). Not 3.14. |
+| Packages | `requirements.txt`, with upper and lower bounds. Tested with chromadb 0.6.3, Flask 3.1.3, gunicorn 23.0.0, google-genai 1.75.0, onnxruntime 1.30.0, rank-bm25 0.2.2, python-dotenv 1.1.1 |
+| Model files | Embeddings: Chroma's ONNX build of all-MiniLM-L6-v2, **~80 MB** downloaded on first index into `~/.cache/chroma` (166 MB on disk on my machine including Chroma's other cache). Generation: hosted, nothing to download. |
+| Key | `GEMINI_API_KEY` in `.env`, free from aistudio.google.com |
+| OS | macOS / Linux (gunicorn doesn't run on Windows; there, use `python serve.py`) |
+
+### From a clean checkout
+
+```bash
+git clone https://github.com/seragy/ai201-project1-unofficial-guide-starter-v2026.git
+cd ai201-project1-unofficial-guide-starter-v2026
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env          # then paste your key after GEMINI_API_KEY=
+./run.sh                      # the one command: builds the index if missing, then serves
+```
+
+`./run.sh` serves on `http://127.0.0.1:8000` (`PORT=9000 ./run.sh` to change
+it). The first start builds the index, which takes about a minute. After that,
+it starts in a few seconds.
+
+### Check it, from a second terminal
+
+```bash
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "is the housing lottery random?"}'
+tail -1 logs/requests.jsonl
+```
+
+### Measuring it
+
+`AI201_CACHE=0` makes every answer a real model call, which is what a
+measurement needs. `tools/measure.py` sets it for you, starts and stops the
+service itself (on port 8000, so stop `./run.sh` first), and runs the capstone
+criteria three times:
+
+```bash
+.venv/bin/python tools/measure.py --label before
+```
+
+### Why one worker, one thread
+
+The per-request token counts are differences between `generate.py`'s
+session counters taken before and after each request. That's exact with one
+sync worker and one thread, and it would bleed between requests with threads.
+More workers (separate processes) would be safe, but each loads its own
+embedder and that costs memory.

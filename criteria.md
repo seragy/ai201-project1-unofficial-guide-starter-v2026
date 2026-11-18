@@ -155,3 +155,85 @@ questions in Milestone 4.
      The whole reason the originals stay visible is so someone can see what you
      said before you knew the answer.
      ───────────────────────────────────────────────────────────────────────── -->
+
+---
+
+# Capstone (unit 9) — the instrumented service
+
+Five new criteria for the extension in unit 9 (shape A: deploy and instrument,
+Path B). Written and committed **before** any test run. Criteria 1–4 are about
+the extension; 5 checks the extension didn't break what it wraps.
+
+One test session = the service started fresh with `AI201_CACHE=0` (so every
+answer is a real model call), one warm-up question that is not counted, then
+**20 requests**: the 10 in-scope questions, the 5 out-of-scope questions, and 5
+malformed requests, all defined in `tools/measure.py`. A trial is one session;
+there are three.
+
+## C1. Every request leaves exactly one complete record
+
+For each of the 20 requests in a session, `logs/requests.jsonl` gains **exactly
+one** record carrying the same `request_id` the response returned, and every
+record has non-null `timestamp`, `request_id`, `status`, `outcome` and
+`duration_ms`. Target: **20 of 20 in every trial**, failures included.
+
+**Why this target:** The log is the extension. A record that's missing for one
+request in twenty is precisely the failure that hides itself, because nobody
+goes looking for a line that isn't there. Anything short of all of them means
+there's a code path that doesn't log, and the bad paths are where those live.
+
+## C2. A malformed request gets a 4xx JSON answer, and a record, never a 500
+
+Five malformed requests: no body at all, `{"question": ""}`,
+`{"question": "   "}`, `{"question": 42}`, and a JSON list `["is the housing
+lottery random?"]`. Target: **5 of 5 return a 4xx status with a JSON `error`
+field, and 5 of 5 are logged with `outcome: "rejected"`, in every trial.** A 500
+is a miss even if it's logged.
+
+**Why this target:** A malformed request is the caller's mistake, and a 4xx
+tells them so. A 500 tells them, and anyone watching the error rate, that the
+service broke. On a host, 500s are what alerts fire on, so a client bug would
+page someone. I already saw the list body return a 500 in my build smoke test,
+before writing this, and I kept it in rather than fixing it outside a measured
+change.
+
+## C3. Answered questions come back in under 3 seconds when warm
+
+Of the 10 in-scope questions in a session (after the warm-up), **at least 9 have
+`duration_ms` ≤ 3000**, in every trial. "Warm" means the embedder is already
+loaded. The first request after a start is excluded on purpose and reported
+separately.
+
+**Why this target:** Someone asking a chat-style question will wait a couple of
+seconds. Past about three, it feels broken and they ask again, which doubles the
+cost. 9 of 10 rather than 10 of 10 because one call is a hosted model on the
+free tier, which I don't control and which has occasional slow responses. I'm
+setting the bar for my system, not for Google's worst minute.
+
+## C4. Cost per question is measured and bounded
+
+From the token counts the model reports (logged as `total_tokens`), the **mean
+across the 10 answered questions is ≤ 750 tokens and no single answered question
+exceeds 1,000**. Also, **5 of 5 refused questions show `model_calls: 0` and
+`total_tokens: 0`**, every trial.
+
+**Why this target:** The prompt is 5 retrieved chunks (my longest post is 549
+characters, roughly 140 tokens) plus the grounding instruction and the question,
+so about 750 is what a normal question should cost. Going over it means more or
+bigger chunks are reaching the model than I think. The refusal half matters
+because the relevance gate is supposed to save money as well as stop guessing.
+A refused question that still calls the model is paying for an answer it throws
+away.
+
+## C5. The extension didn't change the answers
+
+For the 5 unit-1 test questions, the answer contains that question's `expects`
+phrase and names a `.txt` source. For the 5 unit-1 out-of-scope questions, the
+service refuses. Target: **at least 9 of 10 in every trial.**
+
+**Why this target:** This is a regression check. The extension only wraps
+`ask_pipeline`, so the answers should be exactly as good as before, no better
+and no worse. Before means unit 2's after-run, where question 4 (weekend dining
+hours, "9:00am") failed reproducibly on retrieval. That failure is out of scope
+this unit, so 9 of 10 is "no worse than before". 8 of 10 would mean the wrapper
+broke something.

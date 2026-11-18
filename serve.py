@@ -135,13 +135,30 @@ def ask():
     from app import ask_pipeline
     import generate
 
-    payload = request.get_json(silent=True) or {}
-    question = (payload.get("question") or "").strip()
+    # Capstone improvement: check the SHAPE of the input before touching it.
+    # Before this, a JSON list (`.get` on a list) or a non-string question
+    # (`.strip()` on an int) raised AttributeError here and came back as a 500.
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {}
+    problem = None
+    if not isinstance(payload, dict):
+        problem = ("body_not_object", "the request body must be a JSON object")
+        question = ""
+    else:
+        raw = payload.get("question")
+        if raw is not None and not isinstance(raw, str):
+            problem = ("question_not_string", "'question' must be a string")
+            question = ""
+        else:
+            question = (raw or "").strip()
+            if not question:
+                problem = ("empty_question", "no question in the request body")
     g.question = question
 
-    if not question:
+    if problem:
         record = _base_record(400, "rejected")
-        record.update({"error_type": "empty_question", "error": "no question in the request body"})
+        record.update({"error_type": problem[0], "error": problem[1]})
         _log_request(record)
         return (
             jsonify(

@@ -384,3 +384,45 @@ scorer function that checks `results` directly (which `judge()` already
 receives but doesn't use) would have caught the Question 4 failure
 automatically in Milestone 1, rather than needing me to notice the
 scorer/criterion mismatch by hand afterward.
+---
+
+## Capstone
+
+**What This Extends**
+
+The Unofficial Guide (units 1–2): a RAG system over 88 campus_life posts. It
+retrieves with hybrid search, refuses past a 0.6 distance cutoff, and asks
+Gemini (gemini-3.5-flash-lite) for a grounded answer that names its source.
+Until now it only ran as `python app.py ask "..."` on my laptop, plus a bare
+`serve.py` that, in its own words, had "no logging, no timing and no
+metrics." What's new this unit is the operational layer around that HTTP
+service:
+
+1. A single documented command that starts it the way a host would (gunicorn).
+2. A structured JSONL log (`logs/requests.jsonl`) with one record for every
+   request, failures included. Each record holds timestamp, request id, what
+   came in, what went out, total duration, a per-stage time split (retrieval vs
+   generation), and the tokens the model actually reported.
+3. A measurement script (`tools/measure.py`) that reads cost per request from
+   those records rather than from a pricing page.
+
+**The Shape**
+
+**A — Deploy and instrument**, on **Path B (local with logs)**. The extension is
+the run path, the instrumentation, and the numbers that come out of it. Retrieval,
+the gate and the prompt don't change; the service just becomes observable.
+
+Out of scope, decided before building:
+- **No hosting.** The free tier's 512 MB is tight for Chroma + an ONNX
+  embedder in memory, and a signup with a card isn't something I'm going to
+  sign the user up for. Path B is worth the same.
+- **No changes to retrieval, chunking, the relevance gate or the prompt.**
+  Those were unit 1–2's work. If the test turns up a problem there, it goes
+  in What's Still Broken, not into this unit's build.
+- **No dashboard or UI.** The log is a file. Reading it is `tools/measure.py`
+  or `jq`, not a web page.
+- **No rate limiting or auth** on `/ask`. Both are real gaps for a hosted
+  service, and both are a second extension.
+
+Size check: one file changed (`serve.py`), one new tool, one RUNNING.md
+section. That's under the ~90-minute build budget.

@@ -237,3 +237,30 @@ and no worse. Before means unit 2's after-run, where question 4 (weekend dining
 hours, "9:00am") failed reproducibly on retrieval. That failure is out of scope
 this unit, so 9 of 10 is "no worse than before". 8 of 10 would mean the wrapper
 broke something.
+
+### How each is scored (added before any results, after a review asked "would two people score this the same way?")
+
+These pin down measurement only. No target above changed.
+
+- **Every check is per trial**, and a criterion is MET only if it holds in all three.
+- **The warm-up request is logged like any other** (so a session writes 21
+  records), but it's left out of every count. C1's "20 of 20" is the 20 test
+  requests.
+- **C1 "complete":** the five fields are present and not JSON `null`. An
+  `outcome` of `"error"` still counts as a complete record. Completeness is
+  about the record, not about the request succeeding.
+- **C2 "no body":** a POST with no body and no Content-Type header. "A JSON
+  `error` field" means a non-empty string.
+- **C3 `duration_ms`:** the server-side time for the whole request, from
+  Flask receiving it to the response being built (`serve.py::_start_clock` to
+  `_base_record`), not one stage. All 10 in-scope requests count toward the
+  denominator whether answered or refused.
+- **C4 mean and max:** over the in-scope questions whose `outcome` is
+  `"answered"`. If one gets refused, the mean is over the answered ones, and
+  the refusal also shows up as a C5 miss if it's one of the unit-1 questions.
+- **C5 "contains":** a case-insensitive substring match of `expects` in the
+  answer text. "Names a `.txt` source" means `.txt` appears in the answer
+  text, not just in the `sources` field. "Refuses" means the response has
+  `"refused": true`.
+- The questions themselves are listed in `tools/measure.py` (unit 1's 5 are
+  imported from `questions.py`).

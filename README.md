@@ -384,6 +384,7 @@ scorer function that checks `results` directly (which `judge()` already
 receives but doesn't use) would have caught the Question 4 failure
 automatically in Milestone 1, rather than needing me to notice the
 scorer/criterion mismatch by hand afterward.
+
 ---
 
 ## Capstone
